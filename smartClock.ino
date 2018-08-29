@@ -41,7 +41,8 @@
 // Define the number of devices we have in the chain and the hardware interface
 // NOTE: These pin numbers will probably not work with your hardware and may
 // need to be adapted
-#define HARDWARE_TYPE MD_MAX72XX::PAROLA_HW
+#define HARDWARE_TYPE MD_MAX72XX::FC16_HW //PAROLA_HW
+// Changed to FC16_HW for my amazondisplay
 
 // #define MAX_DEVICES 8
 #define MAX_DEVICES 4 // Changed from example
@@ -53,6 +54,8 @@
 #define DATA_PIN  13 // 11  // or MOSI
 #define CS_PIN    15 // 10  // or SS
 
+// WARNING - I connected these to the SCK/MOSI/SS pins, but really I needed HSCK/HMOSI/HSS pins!
+
 // SPI hardware interface
 MD_MAX72XX mx = MD_MAX72XX(HARDWARE_TYPE, CS_PIN, MAX_DEVICES);
 // Arbitrary pins
@@ -63,8 +66,8 @@ MD_MAX72XX mx = MD_MAX72XX(HARDWARE_TYPE, CS_PIN, MAX_DEVICES);
 
 // Global message buffers shared by Serial and Scrolling functions
 #define BUF_SIZE  75
-char message[BUF_SIZE] = { "Hello!" };
-bool newMessageAvailable = true;
+char message[BUF_SIZE] = { "1234" };
+volatile bool newMessageAvailable = true;
 
 void readSerial(void)
 {
