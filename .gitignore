@@ -3,3 +3,12 @@ __vm/.smartClock.vsarduino.h
 smartClock.vcxproj
 smartClock.vcxproj.filters
 UserNetworkSettings.h
+*.xml
+*.buildinfo
+Debug/core.a
+Release/smartClock.ino.elf
+*.bin
+*.elf
+*.o
+*.d
+*.a
