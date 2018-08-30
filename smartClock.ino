@@ -14,13 +14,15 @@
 #define UTC_OFFSET -4  // -5 is EST
 
 
-#define MILITARY_TIME 0 // 1 = 24 hour, 0 = 12 hour
+#define MILITARY_TIME 1 // 1 = 24 hour, 0 = 12 hour
 
 // TODO: Need to take time-zone into account -- DONE
 // TODO: Military versus standard time -- DONE
 // TODO: DST
 // TODO: Dealing with stale NTP time so that the clock isn't wrong
 // TODO: Fix alignment of characters
+
+#define BRIGHTNESS 1 // Max is 15 in the MD_MAX72xx.h library, default is Max/2
 
 
 /************************************************************/
@@ -98,7 +100,7 @@ MD_MAX72XX mx = MD_MAX72XX(HARDWARE_TYPE, CS_PIN, MAX_DEVICES);
 //MD_MAX72XX mx = MD_MAX72XX(HARDWARE_TYPE, DATA_PIN, CLK_PIN, CS_PIN, MAX_DEVICES);
 
 // Text parameters
-#define CHAR_SPACING  1 // pixels between characters
+#define CHAR_SPACING  2 // pixels between characters
 
 // Global message buffers shared by Serial and Scrolling functions
 #define BUF_SIZE  75
@@ -192,6 +194,7 @@ void setup()
 {
 	// Display and serial terminal
 	mx.begin();
+	// mx.control(modStart, modEnd, MD_MAX72XX::UPDATE, MD_MAX72XX::OFF);
 	Serial.begin(57600);
 	Serial.print("\n[MD_MAX72XX Message Display]\nType a message for the scrolling display\nEnd message line with a newline");
 
@@ -215,6 +218,9 @@ void setup()
 	udp.begin(localPort);
 	Serial.print("Local port: ");
 	Serial.println(udp.localPort());
+
+	// Application Code
+	mx.control(0, MAX_DEVICES - 1, MD_MAX72XX::INTENSITY, BRIGHTNESS);
 }
 
 void loop()
