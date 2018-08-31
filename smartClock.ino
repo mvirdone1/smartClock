@@ -25,6 +25,7 @@
 #define BRIGHTNESS 1 // Max is 15 in the MD_MAX72xx.h library, default is Max/2
 
 
+
 /************************************************************/
 // Network
 /************************************************************/
@@ -42,6 +43,8 @@
 // Project example from: https://www.geekstips.com/arduino-time-sync-ntp-server-esp8266-udp/
 
 #include <WiFiUdp.h>
+
+
 
 IPAddress timeServerIP; // time.nist.gov NTP server address
 const char* ntpServerName = "time.nist.gov";
@@ -65,16 +68,22 @@ WiFiUDP udp;						// A UDP instance to let us send and receive packets over UDP
 #include <MD_MAX72xx.h>
 #include <SPI.h>
 
+// New update for scrolling text - old version was static
+#include <MD_Parola.h>
+// Example: https://github.com/MajicDesigns/MD_Parola/blob/master/examples/Parola_Scrolling_ESP8266/Parola_Scrolling_ESP8266.ino
+// Master: https://github.com/MajicDesigns/MD_Parola
+
+
 
 // Code from an example at: https://github.com/MajicDesigns/MD_MAX72XX/blob/master/examples/MD_MAX72xx_PrintText/MD_MAX72xx_PrintText.ino
-/****** <EXAMPLE> *****/
 
-// Define the number of devices we have in the chain and the hardware interface
+// Global message buffers shared by Wifi and Scrolling functions
+#define BUF_SIZE  512
+char curMessage[BUF_SIZE];
+char newMessage[BUF_SIZE];
+bool newMessageAvailable = false;
 
-#include <MD_MAX72xx.h>
-#include <SPI.h>
 
-#define PRINT(s, v) { Serial.print(F(s)); Serial.print(v); }
 
 // Define the number of devices we have in the chain and the hardware interface
 // NOTE: These pin numbers will probably not work with your hardware and may
@@ -95,13 +104,20 @@ WiFiUDP udp;						// A UDP instance to let us send and receive packets over UDP
 // WARNING - I connected these to the SCK/MOSI/SS pins, but really I needed HSCK/HMOSI/HSS pins!
 
 // SPI hardware interface
-MD_MAX72XX mx = MD_MAX72XX(HARDWARE_TYPE, CS_PIN, MAX_DEVICES);
+// Removing instance and using MD_Parola
+// MD_MAX72XX mx = MD_MAX72XX(HARDWARE_TYPE, CS_PIN, MAX_DEVICES);
 // Arbitrary pins
 //MD_MAX72XX mx = MD_MAX72XX(HARDWARE_TYPE, DATA_PIN, CLK_PIN, CS_PIN, MAX_DEVICES);
+
+MD_Parola P = MD_Parola(HARDWARE_TYPE, CS_PIN, MAX_DEVICES);
+
+uint8_t frameDelay = 5;  // default frame delay value
+textEffect_t	scrollEffect = PA_SCROLL_LEFT;
 
 // Text parameters
 #define CHAR_SPACING  2 // pixels between characters
 
+/*
 void printText(uint8_t modStart, uint8_t modEnd, char *pMsg)
 // Print the text string to the LED matrix modules specified.
 // Message area is padded with blank columns after printing.
@@ -163,60 +179,15 @@ void printText(uint8_t modStart, uint8_t modEnd, char *pMsg)
 
     mx.control(modStart, modEnd, MD_MAX72XX::UPDATE, MD_MAX72XX::ON);
 }
+*/
 
-void setup()
+unsigned long getTime()
 {
-    // Display and serial terminal
-    mx.begin();
-    // mx.control(modStart, modEnd, MD_MAX72XX::UPDATE, MD_MAX72XX::OFF);
-    Serial.begin(57600);
-    Serial.print("\n[MD_MAX72XX Message Display]\nType a message for the scrolling display\nEnd message line with a newline");
-
-    /***** Network and timing *****/
-    // We start by connecting to a WiFi network
-    Serial.print("Connecting to ");
-    Serial.println(ssid);
-    WiFi.begin(ssid, password); // Defined inside of UserNetworkSettings.h
-
-    while (WiFi.status() != WL_CONNECTED) {
-        delay(500);
-        Serial.print(".");
-    }
-    Serial.println("");
-
-    Serial.println("WiFi connected");
-    Serial.println("IP address: ");
-    Serial.println(WiFi.localIP());
-
-    Serial.println("Starting UDP");
-    udp.begin(localPort);
-    Serial.print("Local port: ");
-    Serial.println(udp.localPort());
-
-    // Application Code
-    mx.control(0, MAX_DEVICES - 1, MD_MAX72XX::INTENSITY, BRIGHTNESS);
-}
-
-void loop()
-{
-    
-    delay(5000); // 5 second delay between requests
-    // According to this, minimum sampling time should be 4 seconds: https://tf.nist.gov/tf-cgi/servers.cgi
-
     /* Time */
     // Request the host by name and get the server assignment out of the server pool
     WiFi.hostByName(ntpServerName, timeServerIP);
-
-    
-
-    
-
     sendNTPpacket(timeServerIP); // send an NTP packet to a time server
                                  // wait to see if a reply is available
-
-    
-    
-    
 
     int cb = udp.parsePacket();
     if (!cb) {
@@ -227,7 +198,6 @@ void loop()
         Serial.println(cb);
         // We've received a packet, read the data from it
         udp.read(packetBuffer, NTP_PACKET_SIZE); // read the packet into the buffer
-
                                                  //the timestamp starts at byte 40 of the received packet and is four bytes,
                                                  // or two words, long. First, esxtract the two words:
 
@@ -247,7 +217,6 @@ void loop()
         unsigned long epoch = secsSince1900 - seventyYears;
         // print Unix time:
         Serial.println(epoch);
-
 
         // print the hour, minute and second:
         Serial.print("The UTC time is ");       // UTC is the time at Greenwich Meridian (GMT)
@@ -296,7 +265,7 @@ void loop()
                 hour = 12;
             }
         }
-        
+
         // Create strings for display
         String hourString = String(hour);
         // Account for character alignment and/or military zero time
@@ -330,26 +299,87 @@ void loop()
         Serial.print("Local Time: ");
         Serial.println(timeString);
 
+        timeString = String("hello: " + minuteString);
+
         // Create a char array for displaying on the LED display
-        char displayChars[10];
-        timeString.toCharArray(displayChars, 10);
+        char displayChars[20];
+        timeString.toCharArray(displayChars, 20);
 
         // Print the display
-        printText(0, MAX_DEVICES - 1, displayChars);
+        // printText(0, MAX_DEVICES - 1, displayChars);
+
+        P.displayText(displayChars, PA_CENTER, 0, 0, PA_PRINT, PA_NO_EFFECT);
 
 
-        
         /***********************************/
         // END Application Code
         /***********************************/
 
-        
+        return epoch;
 
 
-        
+
     }
-    // wait ten seconds before asking for the time again
-    delay(10000);
+}
+
+void setup()
+{
+
+    // get the display up and running
+    P.begin();
+    P.displayClear();
+    P.displaySuspend(false);
+
+    // P.displayScroll(curMessage, PA_LEFT, scrollEffect, frameDelay);
+    P.displayText(curMessage, PA_CENTER, 0, 0, PA_PRINT, PA_NO_EFFECT);
+    
+    curMessage[0] = newMessage[0] = '\0';
+
+    // Setup serial troubleshooting
+    Serial.begin(57600);
+    Serial.print("\n[MD_MAX72XX Message Display]\nType a message for the scrolling display\nEnd message line with a newline");
+
+    /***** Network and timing *****/
+    // We start by connecting to a WiFi network
+    Serial.print("Connecting to ");
+    Serial.println(ssid);
+    WiFi.begin(ssid, password); // Defined inside of UserNetworkSettings.h
+
+    while (WiFi.status() != WL_CONNECTED) {
+        delay(500);
+        Serial.print(".");
+    }
+    Serial.println("");
+
+    Serial.println("WiFi connected");
+    Serial.println("IP address: ");
+    Serial.println(WiFi.localIP());
+
+    Serial.println("Starting UDP");
+    udp.begin(localPort);
+    Serial.print("Local port: ");
+    Serial.println(udp.localPort());
+
+    // Application Code
+    sprintf(curMessage, "%03d:%03d:%03d:%03d", WiFi.localIP()[0], WiFi.localIP()[1], WiFi.localIP()[2], WiFi.localIP()[3]);
+
+    //P.displayText(curMessage, PA_CENTER, 0, 0, PA_PRINT, PA_NO_EFFECT);
+
+    
+    
+}
+
+void loop()
+{
+    
+    delay(5000); // 5 second delay between requests
+    // According to this, minimum sampling time should be 4 seconds: https://tf.nist.gov/tf-cgi/servers.cgi
+
+    getTime();
+
+    P.displayAnimate();
+    
+    
 }
 
 // send an NTP request to the time server at the given address
