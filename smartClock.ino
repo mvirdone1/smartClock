@@ -24,6 +24,9 @@
 
 #define BRIGHTNESS 1 // Max is 15 in the MD_MAX72xx.h library, default is Max/2
 
+// According to this, minimum sampling time should be 4 seconds: https://tf.nist.gov/tf-cgi/servers.cgi
+#define NTP_TIMEOUT_MS 15000 // Number of millis ticks between when we perform a NTP query
+
 
 
 /************************************************************/
@@ -57,6 +60,7 @@ byte packetBuffer[NTP_PACKET_SIZE]; //buffer to hold incoming and outgoing packe
 WiFiUDP udp;						// A UDP instance to let us send and receive packets over UDP
 
 
+unsigned long startTime = 0;
 
 
 /************************************************************/
@@ -111,298 +115,261 @@ bool newMessageAvailable = false;
 
 MD_Parola P = MD_Parola(HARDWARE_TYPE, CS_PIN, MAX_DEVICES);
 
-uint8_t frameDelay = 5;  // default frame delay value
+uint8_t frameDelay = 65;  // default frame delay value
 textEffect_t	scrollEffect = PA_SCROLL_LEFT;
 
-// Text parameters
-#define CHAR_SPACING  2 // pixels between characters
 
-/*
-void printText(uint8_t modStart, uint8_t modEnd, char *pMsg)
-// Print the text string to the LED matrix modules specified.
-// Message area is padded with blank columns after printing.
-{
-    uint8_t   state = 0;
-    uint8_t   curLen;
-    uint16_t  showLen;
-    uint8_t   cBuf[8];
-    int16_t   col = ((modEnd + 1) * COL_SIZE) - 1;
 
-    mx.control(modStart, modEnd, MD_MAX72XX::UPDATE, MD_MAX72XX::OFF);
-
-    do     // finite state machine to print the characters in the space available
-    {
-        switch (state)
-        {
-        case 0: // Load the next character from the font table
-                // if we reached end of message, reset the message pointer
-            if (*pMsg == '\0')
-            {
-                showLen = col - (modEnd * COL_SIZE);  // padding characters
-                state = 2;
-                break;
-            }
-
-            // retrieve the next character form the font file
-            showLen = mx.getChar(*pMsg++, sizeof(cBuf) / sizeof(cBuf[0]), cBuf);
-            curLen = 0;
-            state++;
-            // !! deliberately fall through to next state to start displaying
-
-        case 1: // display the next part of the character
-            mx.setColumn(col--, cBuf[curLen++]);
-
-            // done with font character, now display the space between chars
-            if (curLen == showLen)
-            {
-                showLen = CHAR_SPACING;
-                state = 2;
-            }
-            break;
-
-        case 2: // initialize state for displaying empty columns
-            curLen = 0;
-            state++;
-            // fall through
-
-        case 3:	// display inter-character spacing or end of message padding (blank columns)
-            mx.setColumn(col--, 0);
-            curLen++;
-            if (curLen == showLen)
-                state = 0;
-            break;
-
-        default:
-            col = -1;   // this definitely ends the do loop
-        }
-    } while (col >= (modStart * COL_SIZE));
-
-    mx.control(modStart, modEnd, MD_MAX72XX::UPDATE, MD_MAX72XX::ON);
-}
-*/
 
 unsigned long getTime()
 {
-    /* Time */
-    // Request the host by name and get the server assignment out of the server pool
-    WiFi.hostByName(ntpServerName, timeServerIP);
-    sendNTPpacket(timeServerIP); // send an NTP packet to a time server
-                                 // wait to see if a reply is available
+	// http://gammon.com.au/millis   
+	unsigned long currentTime = millis();
 
-    int cb = udp.parsePacket();
-    if (!cb) {
-        Serial.println("no packet yet");
-    }
-    else {
-        Serial.print("packet received, length=");
-        Serial.println(cb);
-        // We've received a packet, read the data from it
-        udp.read(packetBuffer, NTP_PACKET_SIZE); // read the packet into the buffer
-                                                 //the timestamp starts at byte 40 of the received packet and is four bytes,
-                                                 // or two words, long. First, esxtract the two words:
+	// If timer is less than timeout MS old, fall out of this function call
+	if (currentTime - startTime < NTP_TIMEOUT_MS)
+	{
+		return 0;
+	}
+	startTime = currentTime;
 
-        unsigned long highWord = word(packetBuffer[40], packetBuffer[41]);
-        unsigned long lowWord = word(packetBuffer[42], packetBuffer[43]);
-        // combine the four bytes (two words) into a long integer
-        // this is NTP time (seconds since Jan 1 1900):
-        unsigned long secsSince1900 = highWord << 16 | lowWord;
-        Serial.print("Seconds since Jan 1 1900 = ");
-        Serial.println(secsSince1900);
+	/* Time */
+	// Request the host by name and get the server assignment out of the server pool
+	WiFi.hostByName(ntpServerName, timeServerIP);
+	sendNTPpacket(timeServerIP); // send an NTP packet to a time server
+								 // wait to see if a reply is available
 
-        // now convert NTP time into everyday time:
-        Serial.print("Unix time = ");
-        // Unix time starts on Jan 1 1970. In seconds, that's 2208988800:
-        const unsigned long seventyYears = 2208988800UL;
-        // subtract seventy years:
-        unsigned long epoch = secsSince1900 - seventyYears;
-        // print Unix time:
-        Serial.println(epoch);
+	int cb = udp.parsePacket();
+	if (!cb) {
+		Serial.println("no packet yet");
+	}
+	else {
+		Serial.print("packet received, length=");
+		Serial.println(cb);
+		// We've received a packet, read the data from it
+		udp.read(packetBuffer, NTP_PACKET_SIZE); // read the packet into the buffer
+												 //the timestamp starts at byte 40 of the received packet and is four bytes,
+												 // or two words, long. First, esxtract the two words:
 
-        // print the hour, minute and second:
-        Serial.print("The UTC time is ");       // UTC is the time at Greenwich Meridian (GMT)
-        Serial.print((epoch % 86400L) / 3600); // print the hour (86400 equals secs per day)
-        Serial.print(':');
-        if (((epoch % 3600) / 60) < 10) {
-            // In the first 10 minutes of each hour, we'll want a leading '0'
-            Serial.print('0');
-        }
-        Serial.print((epoch % 3600) / 60); // print the minute (3600 equals secs per minute)
-        Serial.print(':');
-        if ((epoch % 60) < 10) {
-            // In the first 10 seconds of each minute, we'll want a leading '0'
-            Serial.print('0');
-        }
-        Serial.println(epoch % 60); // print the second
+		unsigned long highWord = word(packetBuffer[40], packetBuffer[41]);
+		unsigned long lowWord = word(packetBuffer[42], packetBuffer[43]);
+		// combine the four bytes (two words) into a long integer
+		// this is NTP time (seconds since Jan 1 1900):
+		unsigned long secsSince1900 = highWord << 16 | lowWord;
+		Serial.print("Seconds since Jan 1 1900 = ");
+		Serial.println(secsSince1900);
 
+		// now convert NTP time into everyday time:
+		Serial.print("Unix time = ");
+		// Unix time starts on Jan 1 1970. In seconds, that's 2208988800:
+		const unsigned long seventyYears = 2208988800UL;
+		// subtract seventy years:
+		unsigned long epoch = secsSince1900 - seventyYears;
+		// print Unix time:
+		Serial.println(epoch);
 
-        /***********************************/
-        // Application Code
-        /***********************************/
-
-        // Create hour and minute integers
-        int hour = ((epoch % 86400L) / 3600) + UTC_OFFSET;
-        int minute = ((epoch % 3600) / 60);
-
-        // Correct hours for both time zones and military time
-        // Fix time zone problems - if we have a negative time, add 24 hours to get us positve again
-        if (hour < 0)
-        {
-            hour += 24;
-        }
-
-        // Civililian time adjustment
-        if (MILITARY_TIME == 0)
-        {
-            // See if we're in the afternoon, if so, correct for the 12 hour offset
-            if (hour > 13)
-            {
-                hour -= 12;
-            }
-
-            // See if we're at zero-hundred, if so, make it 12 midnight
-            if (hour == 0)
-            {
-                hour = 12;
-            }
-        }
-
-        // Create strings for display
-        String hourString = String(hour);
-        // Account for character alignment and/or military zero time
-        if (hour < 10)
-        {
-            // If less than 10, and military time add a leading zero
-            if (MILITARY_TIME == 1)
-            {
-                hourString = String('0' + hourString);
-            }
-            // If less than 10, and not military time, add a leading space
-            else
-            {
-                hourString = String(' ' + hourString);
-            }
+		// print the hour, minute and second:
+	    Serial.print("The UTC time is ");       // UTC is the time at Greenwich Meridian (GMT)
+		Serial.print((epoch % 86400L) / 3600); // print the hour (86400 equals secs per day)
+		Serial.print(':');
+		if (((epoch % 3600) / 60) < 10) {
+			// In the first 10 minutes of each hour, we'll want a leading '0'
+			Serial.print('0');
+		}
+		Serial.print((epoch % 3600) / 60); // print the minute (3600 equals secs per minute)
+		Serial.print(':');
+		if ((epoch % 60) < 10) {
+			// In the first 10 seconds of each minute, we'll want a leading '0'
+			Serial.print('0');
+		}
+		Serial.println(epoch % 60); // print the second
 
 
-        }
+		/***********************************/
+		// Application Code
+		/***********************************/
 
-        String minuteString = String(minute);
-        if (minute < 10)
-        {
-            minuteString = String('0' + minuteString);
-        }
+		// Create hour and minute integers
+		int hour = ((epoch % 86400L) / 3600) + UTC_OFFSET;
+		int minute = ((epoch % 3600) / 60);
 
-        // Create our final formatted string
-        String timeString = String(hourString + ":");
-        timeString = String(timeString + minuteString);
+		// Correct hours for both time zones and military time
+		// Fix time zone problems - if we have a negative time, add 24 hours to get us positve again
+		if (hour < 0)
+		{
+			hour += 24;
+		}
+        
 
-        // Print our string to the serial terminal
-        Serial.print("Local Time: ");
-        Serial.println(timeString);
+		// Civililian time adjustment
+		if (MILITARY_TIME == 0)
+		{
+			// See if we're in the afternoon, if so, correct for the 12 hour offset
+			if (hour > 13)
+			{
+				hour -= 12;
+			}
 
-        timeString = String("hello: " + minuteString);
+			// See if we're at zero-hundred, if so, make it 12 midnight
+			if (hour == 0)
+			{
+				hour = 12;
+			}
+		}
 
-        // Create a char array for displaying on the LED display
-        char displayChars[20];
-        timeString.toCharArray(displayChars, 20);
+		// Create strings for display
+		String hourString = String(hour);
+		// Account for character alignment and/or military zero time
+		if (hour < 10)
+		{
+			// If less than 10, and military time add a leading zero
+			if (MILITARY_TIME == 1)
+			{
+				hourString = String('0' + hourString);
+			}
+			// If less than 10, and not military time, add a leading space
+			else
+			{
+				hourString = String(' ' + hourString);
+			}
 
-        // Print the display
-        // printText(0, MAX_DEVICES - 1, displayChars);
 
-        P.displayText(displayChars, PA_CENTER, 0, 0, PA_PRINT, PA_NO_EFFECT);
+		}
+
+		String minuteString = String(minute);
+		if (minute < 10)
+		{
+			minuteString = String('0' + minuteString);
+		}
+
+		// Create our final formatted string
+		String timeString = String(hourString + ":");
+		timeString = String(timeString + minuteString);
+
+		// Print our string to the serial terminal
+		Serial.print("Local Time: ");
+		Serial.println(timeString);
+		
+
+		// Create a char array for displaying on the LED display
+		char displayChars[20];
+		timeString.toCharArray(displayChars, 20);
+		
+		
+		// Do this the other way where I use the pre-existing global text buffer
+		timeString.toCharArray(curMessage, 512);
+
+		// Print the display
+		// printText(0, MAX_DEVICES - 1, displayChars);
+
+		
+		 // P.displayClear();
+		 // P.displayText(displayChars, PA_CENTER, 0, 0, PA_PRINT, PA_NO_EFFECT);
+		 // P.displayReset();
+		
+         P.displayText(curMessage, PA_CENTER, 0, 0, PA_PRINT, PA_NO_EFFECT);
+		 // P.displayScroll(curMessage, PA_CENTER, PA_PRINT, frameDelay);
+		 //P.displayAnimate();
+
+		/***********************************/
+		// END Application Code
+		/***********************************/
+
+		return epoch;
 
 
-        /***********************************/
-        // END Application Code
-        /***********************************/
 
-        return epoch;
-
-
-
-    }
+	}
 }
 
 void setup()
 {
 
-    // get the display up and running
-    P.begin();
-    P.displayClear();
-    P.displaySuspend(false);
+	// get the display up and running
+	P.begin();
+	P.displayClear();
+	P.displaySuspend(false);
+	P.setIntensity(BRIGHTNESS);
 
-    // P.displayScroll(curMessage, PA_LEFT, scrollEffect, frameDelay);
-    P.displayText(curMessage, PA_CENTER, 0, 0, PA_PRINT, PA_NO_EFFECT);
-    
-    curMessage[0] = newMessage[0] = '\0';
+	P.displayScroll(curMessage, PA_LEFT, scrollEffect, frameDelay);
+	//P.displayText(curMessage, PA_CENTER, 0, 0, PA_PRINT, PA_NO_EFFECT);
+	
+	curMessage[0] = newMessage[0] = '\0';
 
-    // Setup serial troubleshooting
-    Serial.begin(57600);
-    Serial.print("\n[MD_MAX72XX Message Display]\nType a message for the scrolling display\nEnd message line with a newline");
+	// Setup serial troubleshooting
+	Serial.begin(57600);
+	Serial.print("\n[MD_MAX72XX Message Display]\nType a message for the scrolling display\nEnd message line with a newline");
 
-    /***** Network and timing *****/
-    // We start by connecting to a WiFi network
-    Serial.print("Connecting to ");
-    Serial.println(ssid);
-    WiFi.begin(ssid, password); // Defined inside of UserNetworkSettings.h
+	/***** Network and timing *****/
+	// We start by connecting to a WiFi network
+	Serial.print("Connecting to ");
+	Serial.println(ssid);
+	WiFi.begin(ssid, password); // Defined inside of UserNetworkSettings.h
 
-    while (WiFi.status() != WL_CONNECTED) {
-        delay(500);
-        Serial.print(".");
-    }
-    Serial.println("");
+	while (WiFi.status() != WL_CONNECTED) {
+		delay(500);
+		Serial.print(".");
+	}
+	Serial.println("");
 
-    Serial.println("WiFi connected");
-    Serial.println("IP address: ");
-    Serial.println(WiFi.localIP());
+	Serial.println("WiFi connected");
+	Serial.println("IP address: ");
+	Serial.println(WiFi.localIP());
 
-    Serial.println("Starting UDP");
-    udp.begin(localPort);
-    Serial.print("Local port: ");
-    Serial.println(udp.localPort());
+	Serial.println("Starting UDP");
+	udp.begin(localPort);
+	Serial.print("Local port: ");
+	Serial.println(udp.localPort());
 
-    // Application Code
-    sprintf(curMessage, "%03d:%03d:%03d:%03d", WiFi.localIP()[0], WiFi.localIP()[1], WiFi.localIP()[2], WiFi.localIP()[3]);
+	// Application Code
+	sprintf(curMessage, "%03d:%03d:%03d:%03d", WiFi.localIP()[0], WiFi.localIP()[1], WiFi.localIP()[2], WiFi.localIP()[3]);
+	// P.displayAnimate();
 
-    //P.displayText(curMessage, PA_CENTER, 0, 0, PA_PRINT, PA_NO_EFFECT);
+	//P.displayText(curMessage, PA_CENTER, 0, 0, PA_PRINT, PA_NO_EFFECT);
 
-    
-    
+
+	// Set the time
+	startTime = millis();
+
+	
+	
 }
 
 void loop()
 {
-    
-    delay(5000); // 5 second delay between requests
-    // According to this, minimum sampling time should be 4 seconds: https://tf.nist.gov/tf-cgi/servers.cgi
+	getTime();
 
-    getTime();
+    //P.displayAnimate();
 
-    P.displayAnimate();
-    
-    
+	if (P.displayAnimate()) // If finished displaying message
+	{
+	    P.displayReset();  // Reset and display it again
+	}
+	
+	
 }
 
 // send an NTP request to the time server at the given address
 unsigned long sendNTPpacket(IPAddress& address)
 {
-    Serial.println("sending NTP packet...");
-    // set all bytes in the buffer to 0
-    memset(packetBuffer, 0, NTP_PACKET_SIZE);
-    // Initialize values needed to form NTP request
-    // (see URL above for details on the packets)
-    packetBuffer[0] = 0b11100011;   // LI, Version, Mode
-    packetBuffer[1] = 0;     // Stratum, or type of clock
-    packetBuffer[2] = 6;     // Polling Interval
-    packetBuffer[3] = 0xEC;  // Peer Clock Precision
-                             // 8 bytes of zero for Root Delay & Root Dispersion
-    packetBuffer[12] = 49;
-    packetBuffer[13] = 0x4E;
-    packetBuffer[14] = 49;
-    packetBuffer[15] = 52;
+	Serial.println("sending NTP packet...");
+	// set all bytes in the buffer to 0
+	memset(packetBuffer, 0, NTP_PACKET_SIZE);
+	// Initialize values needed to form NTP request
+	// (see URL above for details on the packets)
+	packetBuffer[0] = 0b11100011;   // LI, Version, Mode
+	packetBuffer[1] = 0;     // Stratum, or type of clock
+	packetBuffer[2] = 6;     // Polling Interval
+	packetBuffer[3] = 0xEC;  // Peer Clock Precision
+							 // 8 bytes of zero for Root Delay & Root Dispersion
+	packetBuffer[12] = 49;
+	packetBuffer[13] = 0x4E;
+	packetBuffer[14] = 49;
+	packetBuffer[15] = 52;
 
-    // all NTP fields have been given values, now
-    // you can send a packet requesting a timestamp:
-    udp.beginPacket(address, 123); //NTP requests are to port 123
-    udp.write(packetBuffer, NTP_PACKET_SIZE);
-    udp.endPacket();
+	// all NTP fields have been given values, now
+	// you can send a packet requesting a timestamp:
+	udp.beginPacket(address, 123); //NTP requests are to port 123
+	udp.write(packetBuffer, NTP_PACKET_SIZE);
+	udp.endPacket();
 }
